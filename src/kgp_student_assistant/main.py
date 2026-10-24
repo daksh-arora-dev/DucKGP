@@ -1,11 +1,11 @@
 """Command-line interface for IIT KGP AI Assistant."""
 
 import asyncio
-from kgp_student_assistant.agent.kitchen import create_kgp_agent
+from kgp_student_assistant.agent.kitchen import create_my_agent
 
 
 async def main():
-    agent = await create_kgp_agent()
+    agent = await create_my_agent()
     config = {
         "configurable": {
             "thread_id": "local-dev"
@@ -15,7 +15,7 @@ async def main():
     print("Type 'exit' to quit.\n")
     while True:
         user_input = input("You: ").strip()
-        if user_input.lower() is "exit":
+        if user_input.lower() == "exit":
             break
         if not user_input:
             continue
@@ -32,7 +32,7 @@ async def main():
                 config=config,
             )
             print(
-                "\nAssistant:",
+                "\nDucKGP:",
                 response["messages"][-1].content,
                 "\n"
             )

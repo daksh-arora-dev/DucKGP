@@ -7,7 +7,7 @@ from kgp_student_assistant.agent.llm import get_llm
 from kgp_student_assistant.agent.mcp_client import load_tools
 
 
-async def create_agent():
+async def create_my_agent():
 
     llm = get_llm()
 
