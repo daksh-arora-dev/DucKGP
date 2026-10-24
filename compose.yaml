@@ -1,0 +1,21 @@
+services:
+  mcp:
+    build: .
+    command: ["python", "-m", "kgp_student_assistant.mcp.server"]
+    environment:
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8001
+    expose:
+      - "8001"
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MCP_URL: http://mcp:8001/mcp
+      LLM_MODEL: ${LLM_MODEL:-openai:gpt-4.1-mini}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    depends_on:
+      - mcp
+# Provider SDK must be installed in the image before /chat can use that provider.
+# Compose is a deployment outline, not production-authenticated infrastructure.
