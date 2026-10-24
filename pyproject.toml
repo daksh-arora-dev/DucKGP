@@ -24,6 +24,9 @@ dependencies = [
 [project.optional-dependencies]
 
 # LLM Provider
+groq = [
+    "langchain-groq>=1.0,<2.0"
+]
 
 # Development tools
 dev = [

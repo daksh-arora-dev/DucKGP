@@ -1,2 +1,2 @@
 # Includes the runtime dependencies and development tools from pyproject.toml.
--e .[dev]
+-e .[dev,groq]

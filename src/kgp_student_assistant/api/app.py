@@ -1,7 +1,7 @@
 """HTTP API. Keep endpoints thin; business logic lives elsewhere."""
 from fastapi import FastAPI, HTTPException
 
-from kgp_student_assistant.agent.factory import create_kgp_agent
+from kgp_student_assistant.agent.kitchen import create_kgp_agent
 from kgp_student_assistant.api.schemas import ChatRequest, ChatResponse
 
 app = FastAPI(title="IIT KGP Student Assistant", version="0.1.0")
