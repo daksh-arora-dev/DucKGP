@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    iqps_base_url: str = "https://iqps.metakgp.org"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     llm_model: str = "openai:gpt-4.1-mini"
