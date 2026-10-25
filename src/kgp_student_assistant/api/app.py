@@ -75,6 +75,8 @@ async def chat(request: ChatRequest):
     except Exception as exc:
         logger.exception("Chat request failed")
 
+        print(f"\nACTUAL ERROR: {type(exc).__name__}: {exc}")
+
         raise HTTPException(
             status_code=500,
             detail="Unable to process your request"
