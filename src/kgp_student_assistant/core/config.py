@@ -21,5 +21,9 @@ class Settings(BaseSettings):
     # IQPS Configuration
     iqps_base_url: str = ""
 
+    # Supabase Configuration
+    supabase_url: str = ""
+    supabase_publishable_key: str = ""
+
 
 settings = Settings()

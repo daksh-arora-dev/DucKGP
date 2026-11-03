@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatReply } from './types';
+import { supabase } from './supabase';
 export const DEMO_MODE = false;
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 const ENDPOINT = import.meta.env.VITE_CHAT_ENDPOINT || '/chat';
@@ -19,9 +20,20 @@ export async function sendChatMessage(
   signal?: AbortSignal,
 ): Promise<ChatReply> {
 
+  const { data, error } = await supabase.auth.getSession();
+
+  if (error || !data.session) {
+    throw new Error('Please log in to continue.');
+  }
+
+  const accessToken = data.session.access_token;
+
   const response = await fetch(`${BASE_URL}${ENDPOINT.startsWith('/') ? ENDPOINT : `/${ENDPOINT}`}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    },
     signal,
     body: JSON.stringify({
       message,
