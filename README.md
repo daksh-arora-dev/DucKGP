@@ -18,7 +18,10 @@ Copy-Item .env.example .env
 Copy-Item frontend\.env.example frontend\.env
 ```
 Fill in the required API keys and configuration values.
-### 4. Start the Application
+### 4. Backend setUp
+Make an account on Supabase and fetch urls and keys, put them in envs, corresponding to .env.example. Then run the 3 migration files in SQL editor. 
+
+### 5. Start the Application
 Open three terminals in VS Code.
 **Terminal 1: MCP Server**
 ```powershell
