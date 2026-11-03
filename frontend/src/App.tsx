@@ -1,174 +1,73 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Library from './components/Library';
-import {
-  ArrowRight,
-  BookOpenCheck,
-  ChevronDown,
-  CircleHelp,
-  FileSearch2,
-  GraduationCap,
-  Layers3,
-  MapPinned,
-  Plus,
-  Sparkles,
-  Wifi,
-} from 'lucide-react';
-
+import { ArrowLeft, ArrowRight, BookOpen, FileSearch2, Inbox, Sparkles, UserRound, Wifi, WifiOff, X } from 'lucide-react';
 import Sidebar, { MobileMenuButton } from './components/Sidebar';
-import RightRail from './components/RightRail';
 import Composer from './components/Composer';
 import ChatMessage from './components/ChatMessage';
 import DuckMark from './components/DuckMark';
-import { supabase } from './lib/supabase';
-
-import { DEMO_MODE, sendChatMessage } from './lib/chatApi';
-import { conversationTitle, createConversation } from './lib/storage';
-import { loadCloudConversations, deleteCloudConversation } from './lib/chatHistory';
-import type { ChatMessage as Message, Conversation } from './lib/types';
+import DuckyScene from './components/DuckyScene';
+import Library from './components/Library';
+import GmailConnect from './components/GmailConnect';
 import { useAuth } from './auth/AuthProvider';
+import { supabase } from './lib/supabase';
+import { sendChatMessage } from './lib/chatApi';
+import { loadCloudConversations, deleteCloudConversation } from './lib/chatHistory';
+import { conversationTitle, createConversation } from './lib/storage';
+import type { ChatMessage as Message, Conversation } from './lib/types';
 
-const STARTERS = [
-  {
-    icon: FileSearch2,
-    title: 'Hunt for PYQs',
-    sub: 'Find past-year papers',
-    className: 'starter-yellow',
-    prompt: 'Find previous-year midsem question papers for CH21207',
-  },
-  {
-    icon: BookOpenCheck,
-    title: 'Crack a concept',
-    sub: 'Make the tricky stuff click',
-    className: 'starter-lavender',
-    prompt: 'Explain how convolutional neural networks work using a simple analogy',
-  },
-  {
-    icon: MapPinned,
-    title: 'Campus radar',
-    sub: 'Explore the KGP universe',
-    className: 'starter-coral',
-    prompt: 'Which classrooms are free today at 3 PM?',
-  },
-  {
-    icon: Layers3,
-    title: 'Plan my week',
-    sub: 'Less chaos, more clarity',
-    className: 'starter-mint',
-    prompt: 'Help me organize my study timetable for this week',
-  },
-];
+type View = 'chat' | 'library' | 'gmail' | 'account';
+type ApiStatus = 'checking' | 'online' | 'offline';
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
 
-
-function Welcome({ onSelect }: { onSelect: (prompt: string) => void }) {
+function LoadingMessage() {
   return (
-    <div className="welcome-screen">
-      <div className="welcome-top-label">
-        <span className="label-cross">✳</span> A LITTLE BRAINS. A LOT OF WING.
-      </div>
-
-      <div className="welcome-hero">
-        <div className="welcome-copy">
-          <div className="hello-line">
-            Oh hey, fellow KGPian! <span className="handwave">✳</span>
-          </div>
-          <h1>
-            Let's hatch
-            <br />
-            <span>something</span> <em>great.</em>
-          </h1>
-          <p>
-            Meet your campus co-pilot. Part study buddy, part question hunter,
-            fully powered by curiosity.
-          </p>
-          <div className="welcome-signature">
-            <div className="signature-dots">
-              <i />
-              <i />
-              <i />
-            </div>
-            <span>MADE FOR THE CURIOUS MINDS OF IIT KGP</span>
-          </div>
-        </div>
-
-        <div className="welcome-mascot-area" aria-hidden="true">
-          <div className="orbit orbit-one" />
-          <div className="orbit orbit-two" />
-          <div className="orbit orbit-three" />
-          <span className="orbit-cross orbit-cross-one">+</span>
-          <span className="orbit-cross orbit-cross-two">✳</span>
-          <div className="mascot-glow" />
-          <div className="mascot-main">
-            <DuckMark size={206} animated />
-          </div>
-          <div className="mascot-chip chip-brain">
-            <Sparkles size={13} />
-            <span>
-              IDEAS <strong>ON</strong>
-            </span>
-          </div>
-          <div className="mascot-chip chip-quack">
-            <span>QUACK!_</span>
-            <i />
-          </div>
-          <div className="mascot-decoration">DUCK ENGINE / v1.0</div>
-        </div>
-      </div>
-
-      <div className="starters-heading">
-        <div>
-          <span className="dash-yellow" /> SOMEWHERE TO START
-        </div>
-        <span>01 — 04 / PICK YOUR ADVENTURE</span>
-      </div>
-
-      <div className="starters-grid">
-        {STARTERS.map(({ icon: Icon, title, sub, className, prompt }, index) => (
-          <button
-            key={title}
-            className={`starter-card ${className}`}
-            onClick={() => onSelect(prompt)}
-          >
-            <div className="starter-top">
-              <span className="starter-icon">
-                <Icon size={23} strokeWidth={1.8} />
-              </span>
-              <span className="starter-index">
-                0{index + 1} <ArrowRight size={15} />
-              </span>
-            </div>
-            <strong>{title}</strong>
-            <p>{sub}</p>
-          </button>
-        ))}
-      </div>
-
-      <div className="welcome-bottom-note">
-        <div className="mini-circle">✳</div>
-        <span>JUST TYPE SOMETHING BELOW. I'VE GOT YOU.</span>
-        <span className="note-arrow">↙</span>
+    <div className="chat-message message-assistant loading-message" role="status" aria-label="DucKGP is thinking">
+      <div className="message-avatar assistant-avatar"><DuckMark size={34}/></div>
+      <div className="message-body">
+        <div className="message-meta"><span>DucKGP</span><span className="message-spark"><Sparkles size={14}/></span></div>
+        <div className="typing-pill"><i/><i/><i/><span>hatching an answer</span></div>
       </div>
     </div>
   );
 }
 
-function LoadingMessage() {
+function Welcome({
+  onPrompt,
+  onLibrary,
+  onGmail,
+}: {
+  onPrompt: (prompt: string) => void;
+  onLibrary: () => void;
+  onGmail: () => void;
+}) {
   return (
-    <div className="chat-message message-assistant loading-message">
-      <div className="message-avatar assistant-avatar">
-        <DuckMark size={36} />
-      </div>
-      <div className="message-body">
-        <div className="message-meta">
-          <span>DucKGP</span>
-          <span className="message-spark">
-            <Sparkles size={12} />
-          </span>
+    <div className="welcome-screen">
+      <div className="hero-layout">
+        <div className="welcome-copy">
+          <div className="eyebrow"><span className="eyebrow-dot"/> HI, KGPian. I'M DUCK.</div>
+          <h1>Your campus,<br/><em>a little lighter.</em></h1>
+          <p>Big questions, small worries. I'll help you figure things out, one quack at a time.</p>
+          <div className="hero-stamp"><Sparkles size={15}/> Your tiny, mighty campus sidekick.</div>
         </div>
-        <div className="typing-pill">
-          <span />
-          <span />
-          <span />
-          <span className="typing-label">hatching a thought</span>
+        <DuckyScene />
+      </div>
+      <div className="quick-starts">
+        <div className="quick-title"><span>WHERE TO?</span><span className="quick-title-line" /></div>
+        <div className="quick-grid">
+          <button type="button" className="quick-card" onClick={() => onPrompt('Find CH21207 Fluid Mechanics previous-year midsem papers')}>
+            <span className="quick-icon"><FileSearch2 size={19}/></span>
+            <span className="quick-copy"><strong>Find question papers</strong><small>Look up a PYQ</small></span>
+            <ArrowRight size={16}/>
+          </button>
+          <button type="button" className="quick-card" onClick={onLibrary}>
+            <span className="quick-icon"><BookOpen size={19}/></span>
+            <span className="quick-copy"><strong>Open my library</strong><small>Files & shared notes</small></span>
+            <ArrowRight size={16}/>
+          </button>
+          <button type="button" className="quick-card" onClick={onGmail}>
+            <span className="quick-icon"><Inbox size={19}/></span>
+            <span className="quick-copy"><strong>Connect my inbox</strong><small>Gmail integration</small></span>
+            <ArrowRight size={16}/>
+          </button>
         </div>
       </div>
     </div>
@@ -176,22 +75,10 @@ function LoadingMessage() {
 }
 
 export default function App() {
-
-  const [showLibrary, setShowLibrary] = useState(false);
-
-  const handleSignOut = async () => {
-
-  const { error } = await supabase.auth.signOut({
-    scope: 'local',
-  });
-
-  if (error) {
-    console.error('Logout failed:', error.message);
-  }
-};
-
-  const { session, loading } = useAuth();
-  // Conversation and UI state
+  const { session } = useAuth();
+  const userId = session?.user.id;
+  const email = session?.user.email;
+  const [view, setView] = useState<View>('chat');
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -200,28 +87,24 @@ export default function App() {
   const [isSidebarOpen, setSidebarOpen] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [suggestedText, setSuggestedText] = useState('');
+  const [apiStatus, setApiStatus] = useState<ApiStatus>('checking');
+  const [profileName, setProfileName] = useState('');
+  const [signOutError, setSignOutError] = useState('');
 
-  // References to DOM elements and the in-flight chat request
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
-  const chatViewportRef = useRef<HTMLDivElement | null>(null);
 
-  const activeConversation =
-    conversations.find((conversation) => conversation.id === selectedId) ?? conversations[0];
+  const activeConversation = conversations.find((c) => c.id === selectedId) ?? conversations[0];
   const activeId = activeConversation?.id;
   const messages = activeConversation?.messages ?? [];
 
-
-  // Load the signed-in user's conversations from Supabase.
+  // Fetch the signed-in student's actual chat history; do not read global localStorage chats.
   useEffect(() => {
-    const userId = session?.user.id;
     if (!userId) return;
-
     let cancelled = false;
     setHistoryLoading(true);
     setHistoryError('');
-
     async function loadHistory() {
       try {
         const saved = await loadCloudConversations(userId!);
@@ -230,20 +113,43 @@ export default function App() {
         setConversations(next);
         setSelectedId(next[0].id);
       } catch (error) {
-        if (cancelled) return;
-        setHistoryError(error instanceof Error ? error.message : 'Could not load chats');
+        if (!cancelled) setHistoryError(error instanceof Error ? error.message : 'Could not load chat history.');
       } finally {
         if (!cancelled) setHistoryLoading(false);
       }
     }
-
     void loadHistory();
     return () => { cancelled = true; };
-  }, [session?.user.id, historyRetry]);
+  }, [userId, historyRetry]);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages.length, isBusy, selectedId]);
+    if (!userId) return;
+    let cancelled = false;
+    async function loadName() {
+      const { data } = await supabase.from('profiles').select('full_name').eq('id', userId);
+      if (!cancelled && data?.[0]?.full_name) setProfileName(String(data[0].full_name));
+    }
+    void loadName();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  // Display a real backend status rather than a hardcoded 'live' label.
+  useEffect(() => {
+    let mounted = true;
+    async function check() {
+      try {
+        const result = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(5000) });
+        if (mounted) setApiStatus(result.ok ? 'online' : 'offline');
+      } catch {
+        if (mounted) setApiStatus('offline');
+      }
+    }
+    void check();
+    const timer = window.setInterval(() => { void check(); }, 45_000);
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, []);
+
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages.length, isBusy, selectedId]);
 
   const cancel = useCallback(() => {
     abortRef.current?.abort();
@@ -253,328 +159,190 @@ export default function App() {
 
   const newChat = useCallback(() => {
     cancel();
+    setView('chat');
     setSidebarOpen(false);
     setSuggestedText('');
-
-    const empty = conversations.find((conversation) => conversation.messages.length === 0);
-
-    if (empty) {
-      setSelectedId(empty.id);
-    } else {
+    const empty = conversations.find((c) => c.messages.length === 0);
+    if (empty) setSelectedId(empty.id);
+    else {
       const fresh = createConversation();
       setConversations((previous) => [fresh, ...previous]);
       setSelectedId(fresh.id);
     }
-
-    window.setTimeout(() => composerRef.current?.focus(), 30);
+    window.setTimeout(() => composerRef.current?.focus(), 50);
   }, [cancel, conversations]);
 
-  const changeChat = useCallback(
-    (id: string) => {
-      cancel();
-      setSidebarOpen(false);
-      setSelectedId(id);
-    },
-    [cancel],
-  );
+  const selectChat = useCallback((id: string) => {
+    cancel();
+    setSelectedId(id);
+    setView('chat');
+    setSidebarOpen(false);
+  }, [cancel]);
 
   const deleteChat = useCallback(async (id: string) => {
     cancel();
     try {
-      await deleteCloudConversation(id);
+      // Never delete a remote chat that hasn't been persisted.
+      const conversation = conversations.find((c) => c.id === id);
+      if (conversation?.messages.length) await deleteCloudConversation(id);
+      const remaining = conversations.filter((c) => c.id !== id);
+      const next = remaining.length ? remaining : [createConversation()];
+      setConversations(next);
+      if (selectedId === id || !next.some((c) => c.id === selectedId)) setSelectedId(next[0].id);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Could not delete chat');
-      return;
-    }
-
-    const remaining = conversations.filter((chat) => chat.id !== id);
-    const next = remaining.length ? remaining : [createConversation()];
-    setConversations(next);
-    if (id === selectedId || !next.some((chat) => chat.id === selectedId)) {
-      setSelectedId(next[0].id);
+      window.alert(error instanceof Error ? error.message : 'Could not delete this chat.');
     }
   }, [cancel, conversations, selectedId]);
 
-  const send = useCallback(
-    async (content: string) => {
-      if (historyLoading || isBusy || !content.trim() || !activeId) return;
-
-      const conversationId = activeId;
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      const outgoing: Message = {
-        id: crypto.randomUUID(),
-        role: 'user',
-        content: content.trim(),
-        createdAt: Date.now(),
+  const send = useCallback(async (content: string) => {
+    if (historyLoading || isBusy || !content.trim() || !activeId) return;
+    const conversationId = activeId;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const outgoing: Message = { id: crypto.randomUUID(), role: 'user', content: content.trim(), createdAt: Date.now() };
+    const previousMessages = activeConversation?.messages ?? [];
+    setConversations((current) => current.map((chat) => chat.id === conversationId ? {
+      ...chat,
+      title: chat.messages.length === 0 ? conversationTitle(content) : chat.title,
+      messages: [...chat.messages, outgoing],
+      updatedAt: Date.now(),
+    } : chat));
+    setIsBusy(true);
+    setView('chat');
+    try {
+      const result = await sendChatMessage(outgoing.content, conversationId, previousMessages, controller.signal);
+      if (controller.signal.aborted) return;
+      const incoming: Message = {
+        id: crypto.randomUUID(), role: 'assistant', content: result.reply, createdAt: Date.now(),
+        toolsUsed: result.toolsUsed, sources: result.sources,
       };
+      setConversations((current) => current.map((chat) => chat.id === conversationId
+        ? { ...chat, messages: [...chat.messages, incoming], updatedAt: Date.now() }
+        : chat));
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      const detail = error instanceof Error ? error.message : 'Unexpected error';
+      const failed: Message = {
+        id: crypto.randomUUID(), role: 'assistant', createdAt: Date.now(), error: true,
+        content: `Something went wrong: **${detail}**\n\nPlease check your connection and try again.`,
+      };
+      setConversations((current) => current.map((chat) => chat.id === conversationId
+        ? { ...chat, messages: [...chat.messages, failed], updatedAt: Date.now() }
+        : chat));
+    } finally {
+      if (abortRef.current === controller) { abortRef.current = null; setIsBusy(false); }
+    }
+  }, [historyLoading, isBusy, activeId, activeConversation]);
 
-      const previousMessages = activeConversation?.messages ?? [];
-
-      // Display the user's message immediately, before the API responds.
-      setConversations((current) =>
-        current.map((conversation) =>
-          conversation.id === conversationId
-            ? {
-                ...conversation,
-                title:
-                  conversation.messages.length === 0
-                    ? conversationTitle(content)
-                    : conversation.title,
-                messages: [...conversation.messages, outgoing],
-                updatedAt: Date.now(),
-              }
-            : conversation,
-        ),
-      );
-
-      setIsBusy(true);
-
-      try {
-        const result = await sendChatMessage(
-          outgoing.content,
-          conversationId,
-          previousMessages,
-          controller.signal,
-        );
-
-        if (controller.signal.aborted) return;
-
-        const incoming: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: result.reply,
-          createdAt: Date.now(),
-          toolsUsed: result.toolsUsed,
-          sources: result.sources,
-        };
-
-        setConversations((current) =>
-          current.map((conversation) =>
-            conversation.id === conversationId
-              ? {
-                  ...conversation,
-                  messages: [...conversation.messages, incoming],
-                  updatedAt: Date.now(),
-                }
-              : conversation,
-          ),
-        );
-      } catch (error) {
-        if (controller.signal.aborted) return;
-
-        const detail = error instanceof Error ? error.message : 'Unexpected error';
-        const failed: Message = {
-          id: crypto.randomUUID(),
-          role: 'assistant',
-          content: `I couldn't complete that request. **${detail}**\n\nCheck that your FastAPI backend is running and that its chat route is configured.`,
-          createdAt: Date.now(),
-          error: true,
-        };
-
-        setConversations((current) =>
-          current.map((conversation) =>
-            conversation.id === conversationId
-              ? {
-                  ...conversation,
-                  messages: [...conversation.messages, failed],
-                  updatedAt: Date.now(),
-                }
-              : conversation,
-          ),
-        );
-      } finally {
-        if (abortRef.current === controller) {
-          abortRef.current = null;
-          setIsBusy(false);
-        }
-      }
-    },
-    [historyLoading, isBusy, activeId, activeConversation],
-  );
-
-  // Keyboard shortcuts: Ctrl/Cmd+K to focus; Ctrl/Cmd+Shift+O for a new chat.
   useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
+        setView('chat');
         composerRef.current?.focus();
       }
-
-      if (
-        (event.ctrlKey || event.metaKey) &&
-        event.shiftKey &&
-        event.key.toLowerCase() === 'o'
-      ) {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'o') {
         event.preventDefault();
         newChat();
       }
+      if (event.key === 'Escape') setView('chat');
     };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, [newChat]);
 
-  const suggest = (text: string) => {
-    // Right-rail shortcuts fill the composer; starter cards send immediately.
-    setSuggestedText(text);
-    window.setTimeout(() => composerRef.current?.focus(), 30);
-  };
-
-  const currentTitle = messages.length ? activeConversation?.title : 'Command center';
-
-  if (historyLoading) {
-    return <div className="auth-page">Loading your conversations...</div>;
+  function show(viewName: View) { setView(viewName); setSidebarOpen(false); }
+  async function signOut() {
+    setSignOutError('');
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
+    if (error) { setSignOutError(error.message); setView('account'); }
   }
 
-  if (historyError) {
-    return (
-      <div className="auth-page">
-        <div className="auth-card">
-          <p className="auth-error">{historyError}</p>
-          <button onClick={() => setHistoryRetry((n) => n + 1)}>Retry</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (showLibrary) {
-  return (
-    <Library
-      onBack={() => setShowLibrary(false)}
-    />
+  if (historyLoading) return <div className="app-loading"><DuckMark size={76} animated /><p>Unpacking your conversations...</p></div>;
+  if (historyError) return (
+    <div className="app-loading"><DuckMark size={76}/><p>{historyError}</p><button type="button" className="action-button" onClick={() => setHistoryRetry((n) => n + 1)}>Try again</button></div>
   );
-}
+
+  if (view === 'library') return <Library onBack={() => setView('chat')}/>;
 
   return (
     <div className="app-frame">
       <Sidebar
-        conversations={conversations}
-        selectedId={activeId ?? ''}
-        open={isSidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        onSelect={changeChat}
-        onNew={newChat}
-        onDelete={deleteChat}
+        conversations={conversations} selectedId={activeId ?? ''} open={isSidebarOpen}
+        onClose={() => setSidebarOpen(false)} onSelect={selectChat} onNew={newChat}
+        onChat={() => show('chat')} onDelete={(id) => { void deleteChat(id); }} onLibrary={() => show('library')}
+        onGmail={() => show('gmail')} onAccount={() => show('account')}
+        onSignOut={() => { void signOut(); }} email={email}
       />
-
       <main className="main-panel">
-        <div className="ambient ambient-one" />
-        <div className="ambient ambient-two" />
-
+        <div className="ambient ambient-one" aria-hidden="true"/>
+        <div className="ambient ambient-two" aria-hidden="true"/>
         <header className="main-header">
           <div className="header-left">
-            <MobileMenuButton onClick={() => setSidebarOpen(true)} />
-            <span className="header-location">
-              <GraduationCap size={17} />
-              <span>CAMPUS</span>
-              <span className="slash">/</span>
-              <strong>{currentTitle}</strong>
-            </span>
+            <MobileMenuButton onClick={() => setSidebarOpen(true)}/>
+            <span className="header-location"><span className="header-star">✳</span><span>MY DUCK SPACE</span><span className="slash">/</span><strong>{messages.length ? activeConversation?.title : 'Home'}</strong></span>
           </div>
-
           <div className="header-right">
-            <span>
-              {loading
-                ? 'Checking login...'
-                : session
-                  ? `Signed in: ${session.user.email}`
-                  : 'Not signed in'}
+            <span className={`connection-badge is-${apiStatus}`} title={`FastAPI: ${apiStatus}`}>
+              {apiStatus === 'offline' ? <WifiOff size={13}/> : <Wifi size={13}/>}
+              <span>{apiStatus === 'online' ? 'All systems go' : apiStatus === 'checking' ? 'Connecting...' : 'Backend offline'}</span>
             </span>
-            <button
-              type="button"
-              className="auth-logout"
-              onClick={handleSignOut}
-            >
-              Logout
-            </button>
-            <button
-            type="button"
-            className="library-open"
-            onClick={() => setShowLibrary(true)}
-            >
-              My Library
-            </button>
-            <span className={`mode-badge ${DEMO_MODE ? 'demo-badge' : 'api-badge'}`}>
-              <span className="status-led" />
-              {DEMO_MODE ? 'DESIGN PREVIEW' : 'LIVE API MODE'}
-            </span>
-            <button
-              className="header-help"
-              title="About DucKGP"
-              aria-label="About DucKGP"
-              onClick={() => suggest('What can DucKGP help me with?')}
-            >
-              <CircleHelp size={17} />
-            </button>
+            <button type="button" className="topbar-icon" title="Open library" aria-label="Open library" onClick={() => show('library')}><BookOpen size={18}/></button>
+            <button type="button" className="topbar-icon" title="Gmail connections" aria-label="Gmail connections" onClick={() => show('gmail')}><Inbox size={18}/></button>
+            <button type="button" className="topbar-avatar" title="My account" aria-label="My account" onClick={() => show('account')}><UserRound size={17}/></button>
           </div>
         </header>
 
-        <div
-          className={`main-scroll ${messages.length ? 'is-chatting' : 'is-welcome'}`}
-          ref={chatViewportRef}
-        >
+        <div className={`main-scroll ${messages.length ? 'is-chatting' : 'is-welcome'}`}>
           {messages.length === 0 ? (
-            <Welcome onSelect={send} />
+            <Welcome onPrompt={(prompt) => { void send(prompt); }} onLibrary={() => show('library')} onGmail={() => show('gmail')}/>
           ) : (
             <div className="conversation-view">
               <div className="conversation-top">
-                <span className="conversation-kicker">
-                  SESSION / <span>{activeId?.slice(0, 8).toUpperCase()}</span>
-                </span>
-                <div className="conversation-title-row">
-                  <h2>{activeConversation?.title}</h2>
-                  <span>
-                    <ChevronDown size={15} /> OPEN SESSION
-                  </span>
-                </div>
-                <p>One question at a time, one bright idea after another.</p>
+                <span className="conversation-kicker">DUCK TALK / {activeId?.slice(0, 8).toUpperCase()}</span>
+                <div className="conversation-title-row"><h2>{activeConversation?.title}</h2></div>
+                <p>Thinking together, one message at a time.</p>
               </div>
-
               <div className="message-list">
-                {messages.map((message) => (
-                  <ChatMessage key={message.id} message={message} />
-                ))}
-                {isBusy && <LoadingMessage />}
+                {messages.map((message) => <ChatMessage key={message.id} message={message}/>)}
+                {isBusy && <LoadingMessage/>}
               </div>
-              <div ref={endRef} className="end-marker" />
+              <div ref={endRef} className="end-marker"/>
             </div>
           )}
         </div>
-
         <Composer
-          onSend={send}
-          onStop={cancel}
-          busy={isBusy}
-          focusRef={composerRef}
-          suggestedText={suggestedText}
+          onSend={(content) => { void send(content); }} onStop={cancel} busy={isBusy}
+          focusRef={composerRef} suggestedText={suggestedText}
           onSuggestionApplied={() => setSuggestedText('')}
         />
-
-        <div className="main-edge-ornament">
-          <span>✳</span> CURIOUS / CAPABLE / QUACKABLE <span>✳</span>
-        </div>
       </main>
 
-      <RightRail onPrompt={suggest} />
-
-      <button
-        className="new-chat-floating"
-        onClick={newChat}
-        title="New conversation"
-        aria-label="New conversation"
-      >
-        <Plus size={22} />
-      </button>
-
-      <div className="screen-reader" aria-live="polite">
-        {DEMO_MODE ? 'Demo mode: answers are simulated' : 'Live API mode'}
-      </div>
-
-      <div className="version-corner">
-        <Wifi size={12} /> DUCKSYSTEM · 1.0 <ArrowRight size={12} />
-      </div>
+      {(view === 'gmail' || view === 'account') && (
+        <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setView('chat'); }}>
+          <section className="modal-card" role="dialog" aria-modal="true" aria-label={view === 'gmail' ? 'Gmail connection' : 'My account'}>
+            <button type="button" className="modal-close" onClick={() => setView('chat')} aria-label="Close dialog"><X size={18}/></button>
+            <div className="modal-symbol">{view === 'gmail' ? <Inbox size={23}/> : <UserRound size={23}/>}</div>
+            {view === 'gmail' ? (
+              <>
+                <p className="modal-eyebrow">YOUR CONNECTIONS</p>
+                <h2>Gmail, meet DucKGP.</h2>
+                <p>Connect your inbox to let the assistant search and summarize your mail when you ask. You stay in control.</p>
+                <GmailConnect />
+              </>
+            ) : (
+              <>
+                <p className="modal-eyebrow">YOUR SPACE</p>
+                <h2>{profileName || 'My account'}</h2>
+                <p>{email || 'Signed in to DucKGP'}</p>
+                {signOutError && <p role="alert" className="auth-error">{signOutError}</p>}
+                <button type="button" className="action-button" onClick={() => { void signOut(); }}>Sign out <ArrowRight size={16}/></button>
+              </>
+            )}
+            <button type="button" className="modal-back" onClick={() => setView('chat')}><ArrowLeft size={15}/> Back to chat</button>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

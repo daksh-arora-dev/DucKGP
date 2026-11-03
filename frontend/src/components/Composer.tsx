@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
-import { ArrowUp, CornerDownLeft, Square, WandSparkles } from 'lucide-react';
-import { DEMO_MODE } from '../lib/chatApi';
+import { ArrowUp, CornerDownLeft, Square, Sparkles } from 'lucide-react';
 
 interface Props {
   onSend: (message: string) => void;
@@ -44,7 +43,6 @@ export default function Composer({ onSend, onStop, busy, focusRef, suggestedText
   return (
     <div className="composer-shell">
       <div className="composer">
-        <div className="composer-topline"><span className="composer-sparkle"><WandSparkles size={14} /></span><span>ASK YOUR CAMPUS CO-PILOT</span><span className="composer-counter">{value.length > 0 ? `${value.length} characters` : 'READY WHEN YOU ARE'}</span></div>
         <textarea
           ref={(node) => { innerRef.current = node; focusRef.current = node; }}
           rows={1}
@@ -52,19 +50,20 @@ export default function Composer({ onSend, onStop, busy, focusRef, suggestedText
           maxLength={12000}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Ask anything about campus, classes, or a curious idea..."
-          aria-label="Chat message"
+          placeholder="Ask me anything, KGPian..."
+          aria-label="Message DucKGP"
         />
         <div className="composer-bottom">
-          <div className="composer-hint"><CornerDownLeft size={13} /><span><strong>Enter</strong> to send · Shift + Enter for new line</span></div>
+          <span className="composer-hint"><Sparkles size={15}/><span>Made for curious minds</span></span>
+          <span className="composer-key-hint"><CornerDownLeft size={12}/> Enter to send</span>
           {busy ? (
-            <button className="send-button stop-button" onClick={onStop} title="Stop response" aria-label="Stop response"><Square size={16} fill="currentColor" /></button>
+            <button type="button" className="send-button stop-button" onClick={onStop} title="Stop response" aria-label="Stop response"><Square size={15} fill="currentColor"/></button>
           ) : (
-            <button className="send-button" disabled={!canSend} onClick={submit} title="Send message" aria-label="Send message"><ArrowUp size={20} strokeWidth={2.5} /></button>
+            <button type="button" className="send-button" disabled={!canSend} onClick={submit} title="Send message" aria-label="Send message"><ArrowUp size={19} strokeWidth={2.6}/></button>
           )}
         </div>
       </div>
-      <div className="composer-footer"><span>MADE WITH <span className="heart">♥</span> FOR KGP</span><span>{DEMO_MODE ? 'DEMO REPLIES · NO LIVE AI' : 'AI RESPONSES MAY BE INACCURATE · VERIFY SOURCES'}</span></div>
+      <p className="composer-footer">DucKGP may make mistakes. Verify important information.</p>
     </div>
   );
 }
