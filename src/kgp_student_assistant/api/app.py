@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.agent = await create_my_agent()
     yield
 
 
@@ -51,6 +50,7 @@ async def chat(
         raise HTTPException(422, "Invalid conversation ID") from exc
 
     # Auth dependency has already verified this Bearer token with Supabase Auth.
+    agent = await create_my_agent(access_token)
     access_token = request.headers["authorization"].split(" ", 1)[1]
 
     try:
@@ -61,9 +61,17 @@ async def chat(
             history = await store.recent_messages(conversation_id)
             await store.save_message(conversation_id, "user", payload.message)
 
-            response = await app.state.agent.ainvoke(
-                {"messages": history + [{"role": "user", "content": payload.message}]}
-            )
+            response = await agent.ainvoke(
+            {
+                "messages": history + [
+                    {
+                        "role": "user",
+                        "content": payload.message
+                    }
+                ]
+            }
+        )
+
             reply = str(response["messages"][-1].content)
             await store.save_message(conversation_id, "assistant", reply)
             await store.touch_conversation(conversation_id)

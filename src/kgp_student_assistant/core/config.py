@@ -25,5 +25,21 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_publishable_key: str = ""
 
+    # Google OAuth
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
+    google_redirect_uri: str = (
+        "http://localhost:8000/gmail/callback"
+    )
+
+    gmail_frontend_url: str = "http://localhost:5173"
+
+    # Encryption
+    gmail_encryption_key: str = ""
+
+    # Supabase elevated backend access
+    supabase_secret_key: str = ""
+
 
 settings = Settings()
