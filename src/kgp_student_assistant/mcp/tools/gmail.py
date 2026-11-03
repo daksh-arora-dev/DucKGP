@@ -52,5 +52,5 @@ async def search_gmail(
     return await search_messages(
         user_id=user_id,
         query=query,
-        limit=limit,
+        limit=min(limit, 3),
     )
