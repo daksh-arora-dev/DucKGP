@@ -1,348 +1,246 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, BookOpen, FileSearch2, Inbox, Sparkles, UserRound, Wifi, WifiOff, X } from 'lucide-react';
-import Sidebar, { MobileMenuButton } from './components/Sidebar';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AnimatePresence, MotionConfig, motion, useSpring, useTransform } from 'motion/react';
+import { ArrowDown, Command as CmdIcon, Menu, Minimize2, PanelRight, Settings2, Share2, Wifi, WifiOff, Maximize2 } from 'lucide-react';
+import Sidebar, { type NavView } from './components/Sidebar';
 import Composer from './components/Composer';
 import ChatMessage from './components/ChatMessage';
-import DuckMark from './components/DuckMark';
-import DuckyScene from './components/DuckyScene';
-import Library from './components/Library';
-import GmailConnect from './components/GmailConnect';
+import Welcome from './components/Welcome';
+import Duck from './components/Duck';
+import CommandPalette, { type Command } from './components/CommandPalette';
+import type { SettingsSection } from './components/SettingsModal';
+import ShareDialog from './components/ShareDialog';
+import ContextPanel from './components/ContextPanel';
+import { ConfirmDialog, Toasts } from './components/ui';
+import { IntegrationsProvider, useIntegrations } from './core/IntegrationsProvider';
+import { setAudioPrefs, setPrefs, usePrefs } from './core/prefs';
+import { changeThemeAnimated } from './core/theme';
+import { pointerX, pointerY } from './core/duck';
+import { useMotionScale, spring } from './core/motion';
+import { useMediaQuery } from './core/hooks';
+import { sfx } from './core/audio';
 import { useAuth } from './auth/AuthProvider';
 import { supabase } from './lib/supabase';
-import { sendChatMessage } from './lib/chatApi';
-import { loadCloudConversations, deleteCloudConversation } from './lib/chatHistory';
-import { conversationTitle, createConversation } from './lib/storage';
-import type { ChatMessage as Message, Conversation } from './lib/types';
+import { API_BASE } from './lib/api';
+import { useChat } from './lib/useChat';
+import { toast } from './core/toast';
 
-type View = 'chat' | 'library' | 'gmail' | 'account';
+const Library = lazy(() => import('./components/Library'));
+const SettingsModal = lazy(() => import('./components/SettingsModal'));
 type ApiStatus = 'checking' | 'online' | 'offline';
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const WIDTHS = { narrow: 680, medium: 820, wide: 1020 } as const;
 
-function LoadingMessage() {
+function Ambient() {
+  const scale = useMotionScale();
+  const ax = useSpring(useTransform(pointerX, (v) => v * -30 * scale), { stiffness: 40, damping: 20 });
+  const ay = useSpring(useTransform(pointerY, (v) => v * -24 * scale), { stiffness: 40, damping: 20 });
+  return <div className="ambient" aria-hidden="true"><motion.i className="orb o1" style={{ x: ax, y: ay }} /><motion.i className="orb o2" style={{ x: ay, y: ax }} /></div>;
+}
+
+function Shell() {
+  const { session } = useAuth();
+  const userId = session?.user.id ?? '';
+  const email = session?.user.email;
+  const prefs = usePrefs();
+  const chat = useChat(userId);
+  const { summary } = useIntegrations();
+  const narrow = useMediaQuery('(max-width: 820px)');
+  const wideEnough = useMediaQuery('(min-width: 1180px)');
+
+  const [view, setView] = useState<NavView>('chat');
+  const [name, setName] = useState('');
+  const [api, setApi] = useState<ApiStatus>('checking');
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [settings, setSettings] = useState<{ open: boolean; section: SettingsSection }>({ open: false, section: 'appearance' });
+  const [shareFor, setShareFor] = useState<string | null>(null);
+  const [deleteFor, setDeleteFor] = useState<string | null>(null);
+  const [injected, setInjected] = useState<{ text: string; nonce: number } | null>(null);
+  const [unseen, setUnseen] = useState(0);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
+  const signOutRef = useRef(false);
+
+  const { active, activeId, conversations, caps } = chat;
+  const messages = active?.messages ?? [];
+  const lastMsg = messages[messages.length - 1];
+  const focus = prefs.focusMode;
+  const showContext = prefs.contextPanel && wideEnough && !focus && view === 'chat';
+  const openSettings = useCallback((section: SettingsSection = 'appearance') => setSettings({ open: true, section }), []);
+
+  useEffect(() => {
+    if (!userId) return;
+    let off = false;
+    void supabase.from('profiles').select('full_name').eq('id', userId).maybeSingle().then(({ data }) => { if (!off && data?.full_name) setName(String(data.full_name)); });
+    return () => { off = true; };
+  }, [userId]);
+
+  useEffect(() => {
+    let on = true;
+    async function check() {
+      try { const r = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(5000) }); if (on) setApi(r.ok ? 'online' : 'offline'); }
+      catch { if (on) setApi('offline'); }
+    }
+    void check();
+    const t = window.setInterval(() => { void check(); }, 45_000);
+    return () => { on = false; window.clearInterval(t); };
+  }, []);
+
+  // Intelligent auto-scroll: follow only when the reader is already at the bottom.
+  const toBottom = useCallback((smooth: boolean) => {
+    const el = scrollRef.current; if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth && prefs.intensity !== 'off' ? 'smooth' : 'auto' });
+    stick.current = true; setUnseen(0);
+  }, [prefs.intensity]);
+  useEffect(() => { requestAnimationFrame(() => toBottom(false)); }, [activeId, view, toBottom]);
+  useEffect(() => {
+    if (!lastMsg) return;
+    if (stick.current || lastMsg.role === 'user') requestAnimationFrame(() => toBottom(true));
+    else setUnseen((n) => n + 1);
+  }, [lastMsg?.id, chat.isBusy]); // eslint-disable-line react-hooks/exhaustive-deps
+  const onScroll = () => { const el = scrollRef.current; if (!el) return; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 90; if (stick.current) setUnseen(0); };
+
+  const goChat = useCallback(() => { setView('chat'); setMobileOpen(false); }, []);
+  const newChat = useCallback(() => { chat.newChat(); goChat(); window.setTimeout(() => composerRef.current?.focus(), 80); }, [chat, goChat]);
+  const send = useCallback((text: string) => { goChat(); void chat.send(text); }, [chat, goChat]);
+  const inject = useCallback((text: string) => { goChat(); setInjected({ text, nonce: Date.now() }); }, [goChat]);
+  const fromIntegration = useCallback((text: string) => { if (text.endsWith(' ')) inject(text); else send(text); }, [inject, send]);
+  const signOut = useCallback(async () => {
+    if (signOutRef.current) return; signOutRef.current = true;
+    const { error } = await supabase.auth.signOut({ scope: 'local' });
+    if (error) { toast('error', 'Could not sign out', error.message); signOutRef.current = false; }
+  }, []);
+
+  const commands = useMemo<Command[]>(() => {
+    const c: Command[] = [
+      { id: 'new', group: 'Actions', label: 'New chat', hint: '⇧⌘O', run: newChat },
+      { id: 'lib', group: 'Actions', label: 'Open library', run: () => { sfx('nav'); setView('library'); } },
+      { id: 'focus', group: 'Actions', label: focus ? 'Exit focus mode' : 'Enter focus mode', hint: '⇧⌘F', run: () => setPrefs({ focusMode: !focus }) },
+      { id: 'sidebar', group: 'Actions', label: 'Toggle sidebar', hint: '⌘B', run: () => setPrefs({ sidebarCollapsed: !prefs.sidebarCollapsed }) },
+      { id: 'ctx', group: 'Actions', label: 'Toggle context panel', hint: '⌘\\', run: () => setPrefs({ contextPanel: !prefs.contextPanel }) },
+      { id: 'th-sys', group: 'Theme', label: 'Theme: System', run: () => changeThemeAnimated(() => setPrefs({ theme: 'system' })) },
+      { id: 'th-l', group: 'Theme', label: 'Theme: Light', run: () => changeThemeAnimated(() => setPrefs({ theme: 'light' })) },
+      { id: 'th-d', group: 'Theme', label: 'Theme: Dark', run: () => changeThemeAnimated(() => setPrefs({ theme: 'dark' })) },
+      { id: 'snd', group: 'Sound', label: prefs.audio.master ? 'Turn all sound off' : 'Turn sound on', run: () => setAudioPrefs({ master: !prefs.audio.master }) },
+      { id: 'set', group: 'Settings', label: 'Open settings', hint: '⌘,', run: () => openSettings() },
+      { id: 'set-int', group: 'Settings', label: 'Integrations & ecosystem ring', keywords: 'gmail connect', run: () => openSettings('integrations') },
+      { id: 'set-snd', group: 'Settings', label: 'Sound settings', run: () => openSettings('sound') },
+      { id: 'set-priv', group: 'Settings', label: 'Privacy & shared links', run: () => openSettings('privacy') },
+      { id: 'set-acc', group: 'Settings', label: 'Account & profile', run: () => openSettings('account') },
+    ];
+    conversations.filter((x) => x.messages.length).slice(0, 40).forEach((x) =>
+      c.push({ id: `c-${x.id}`, group: 'Chats', label: x.title, keywords: x.messages.map((m) => m.content).join(' ').slice(0, 2000), run: () => { chat.select(x.id); goChat(); } }));
+    return c;
+  }, [conversations, newChat, focus, prefs, openSettings, chat, goChat]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.ctrlKey || e.metaKey;
+      const k = e.key.toLowerCase();
+      const typing = /^(input|textarea|select)$/i.test((e.target as HTMLElement)?.tagName ?? '');
+      if (mod && k === 'k') { e.preventDefault(); setPaletteOpen((o) => !o); }
+      else if (mod && e.shiftKey && k === 'o') { e.preventDefault(); newChat(); }
+      else if (mod && !e.shiftKey && k === 'b') { e.preventDefault(); if (narrow) setMobileOpen((o) => !o); else setPrefs({ sidebarCollapsed: !prefs.sidebarCollapsed }); }
+      else if (mod && k === '\\') { e.preventDefault(); setPrefs({ contextPanel: !prefs.contextPanel }); }
+      else if (mod && e.shiftKey && k === 'f') { e.preventDefault(); setPrefs({ focusMode: !focus }); }
+      else if (mod && k === ',') { e.preventDefault(); openSettings(); }
+      else if (k === '/' && !mod && !typing) { e.preventDefault(); goChat(); composerRef.current?.focus(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [newChat, narrow, prefs.sidebarCollapsed, prefs.contextPanel, focus, openSettings, goChat]);
+
+  if (chat.loading) return <div className="app-loading"><Duck size={96} interactive={false} /><p>Unpacking your conversations…</p></div>;
+  if (chat.loadError) return <div className="app-loading"><Duck size={96} interactive={false} /><p role="alert">{chat.loadError}</p><button type="button" className="btn primary" onClick={chat.retryLoad}>Try again</button></div>;
+
+  const deleting = conversations.find((c) => c.id === deleteFor);
+  const sharing = conversations.find((c) => c.id === shareFor);
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant' && !m.error)?.id;
+  const userBefore = (id: string) => { const i = messages.findIndex((m) => m.id === id); for (let j = i - 1; j >= 0; j--) if (messages[j].role === 'user') return messages[j].content; return undefined; };
+  const canDelete = caps.messageDelete !== false;
+  const sidebarW = focus ? 0 : narrow ? 0 : prefs.sidebarCollapsed ? 68 : prefs.sidebarWidth;
+
   return (
-    <div className="chat-message message-assistant loading-message" role="status" aria-label="DucKGP is thinking">
-      <div className="message-avatar assistant-avatar"><DuckMark size={34}/></div>
-      <div className="message-body">
-        <div className="message-meta"><span>DucKGP</span><span className="message-spark"><Sparkles size={14}/></span></div>
-        <div className="typing-pill"><i/><i/><i/><span>hatching an answer</span></div>
+    <MotionConfig reducedMotion={prefs.intensity === 'off' || prefs.reducedMotion ? 'always' : 'user'} transition={spring}>
+      <div className={`app ${focus ? 'is-focus' : ''}`} style={{ ['--sidebar-w' as string]: `${sidebarW}px`, ['--chat-w' as string]: `${WIDTHS[prefs.chatWidth]}px`, ['--context-w' as string]: showContext ? '320px' : '0px' }}>
+        {!focus && (
+          <Sidebar conversations={conversations} activeId={activeId} caps={caps} view={view} collapsed={prefs.sidebarCollapsed} width={prefs.sidebarWidth} mobile={narrow} mobileOpen={mobileOpen}
+            name={name} email={email} onNew={newChat} onSelect={(id) => { chat.select(id); goChat(); }} onRename={(id, t) => { void chat.rename(id, t); }}
+            onPin={(id) => { void chat.togglePin(id); }} onArchive={(id) => { void chat.toggleArchive(id); }} onShare={setShareFor} onDelete={setDeleteFor}
+            onNav={(v) => { setView(v); setMobileOpen(false); }} onSettings={() => openSettings()} onSearch={() => setPaletteOpen(true)}
+            onResize={(w) => setPrefs({ sidebarWidth: w })} onToggleCollapse={() => setPrefs({ sidebarCollapsed: !prefs.sidebarCollapsed })} onCloseMobile={() => setMobileOpen(false)} />
+        )}
+        <main className="main">
+          <Ambient />
+          <header className="topbar">
+            {narrow && !focus && <button type="button" className="icon-btn" aria-label="Open navigation" onClick={() => setMobileOpen(true)}><Menu size={20} /></button>}
+            <h2 className="top-title">{view === 'library' ? 'Library' : messages.length ? active?.title : 'New chat'}</h2>
+            <div className="top-actions">
+              <span className={`status-badge ${api}`} title={`FastAPI: ${api}`}>{api === 'offline' ? <WifiOff size={13} /> : <Wifi size={13} />}<span>{api === 'online' ? 'Online' : api === 'checking' ? 'Connecting' : 'Backend offline'}</span></span>
+              {view === 'chat' && messages.length > 0 && <button type="button" className="icon-btn" aria-label="Share conversation" title={caps.sharing ? 'Share conversation' : 'Sharing needs migration 03'} disabled={!caps.sharing || !!lastMsg?.local && messages.every((m) => m.local)} onClick={() => setShareFor(activeId)}><Share2 size={17} /></button>}
+              <button type="button" className="icon-btn" aria-label="Command palette" title="Command palette (Ctrl+K)" onClick={() => setPaletteOpen(true)}><CmdIcon size={17} /></button>
+              {wideEnough && <button type="button" className={`icon-btn ${prefs.contextPanel ? 'on' : ''}`} aria-pressed={prefs.contextPanel} aria-label="Toggle context panel" title="Context panel (Ctrl+\)" onClick={() => setPrefs({ contextPanel: !prefs.contextPanel })}><PanelRight size={17} /></button>}
+              <button type="button" className={`icon-btn ${focus ? 'on' : ''}`} aria-pressed={focus} aria-label={focus ? 'Exit focus mode' : 'Focus mode'} title="Focus mode (Ctrl+Shift+F)" onClick={() => setPrefs({ focusMode: !focus })}>{focus ? <Minimize2 size={17} /> : <Maximize2 size={17} />}</button>
+              <button type="button" className="icon-btn" aria-label="Settings" title="Settings (Ctrl+,)" onClick={() => openSettings()}><Settings2 size={17} /></button>
+            </div>
+          </header>
+
+          {view === 'library' ? <div className="scroll"><Suspense fallback={null}><Library /></Suspense></div> : (
+            <>
+              <div className="scroll" ref={scrollRef} onScroll={onScroll}>
+                {messages.length === 0 ? (
+                  <Welcome name={name} onPrompt={send} onIntegrations={() => openSettings('integrations')} />
+                ) : (
+                  <div className="thread" role="log" aria-live="polite" aria-label="Conversation">
+                    {messages.map((m) => (
+                      <ChatMessage key={m.id} message={m} isLastAssistant={m.id === lastAssistantId} canDelete={canDelete} deleteHint="Message delete needs migration 02"
+                        onRegenerate={() => { const t = userBefore(m.id); if (t) void chat.send(t); }}
+                        onRetry={() => { const t = userBefore(m.id); if (t) { void chat.deleteMessage(activeId, m); void chat.send(t); } }}
+                        onEdit={m.role === 'user' ? inject : undefined} onDelete={() => { void chat.deleteMessage(activeId, m); }} />
+                    ))}
+                    <AnimatePresence>{chat.isBusy && <Thinking key="thinking" onStop={() => chat.cancel()} />}</AnimatePresence>
+                    {chat.stopped[activeId] && !chat.isBusy && (
+                      <div className="note" role="status">You stopped waiting. The server may still finish this reply and save it. <button type="button" className="link-btn" onClick={() => { void chat.checkLate(activeId); }}>Check for it</button></div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <AnimatePresence>
+                {unseen > 0 && <motion.button type="button" className="jump" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }} onClick={() => toBottom(true)}><ArrowDown size={15} />{unseen} new</motion.button>}
+              </AnimatePresence>
+              <Composer conversationId={activeId} onSend={(t) => { void chat.send(t); }} onStop={() => chat.cancel()} busy={chat.isBusy} focusRef={composerRef} injected={injected} />
+            </>
+          )}
+        </main>
+        {showContext && <ContextPanel conversation={active} api={api} onClose={() => setPrefs({ contextPanel: false })} onOpenIntegrations={() => openSettings('integrations')} />}
+        {focus && <button type="button" className="focus-exit" onClick={() => setPrefs({ focusMode: false })}><Minimize2 size={14} /> Exit focus</button>}
       </div>
-    </div>
+
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
+      <Suspense fallback={null}><SettingsModal open={settings.open} section={settings.section} onSection={(s) => setSettings({ open: true, section: s })} onClose={() => setSettings((s) => ({ ...s, open: false }))}
+        userId={userId} email={email} caps={caps} onSignOut={() => { void signOut(); }} onName={setName} onPrompt={fromIntegration} onView={(v) => setView(v)} /></Suspense>
+      <ShareDialog conversationId={shareFor} title={sharing?.title ?? ''} onClose={() => setShareFor(null)} />
+      <ConfirmDialog open={!!deleting} danger title="Delete conversation?" confirmLabel="Delete" body={<>“{deleting?.title}” and all its messages will be permanently deleted{caps.sharing ? ', and any share links to it stop working' : ''}.</>}
+        onCancel={() => setDeleteFor(null)} onConfirm={() => { if (deleteFor) void chat.remove(deleteFor); setDeleteFor(null); }} />
+      <Toasts />
+      <span className="sr-only" aria-live="polite">{summary.total ? `${summary.connected} of ${summary.total} integrations connected` : ''}</span>
+    </MotionConfig>
   );
 }
 
-function Welcome({
-  onPrompt,
-  onLibrary,
-  onGmail,
-}: {
-  onPrompt: (prompt: string) => void;
-  onLibrary: () => void;
-  onGmail: () => void;
-}) {
+function Thinking({ onStop }: { onStop: () => void }) {
+  const [s, setS] = useState(0);
+  useEffect(() => { const t = window.setInterval(() => setS((n) => n + 1), 1000); return () => window.clearInterval(t); }, []);
   return (
-    <div className="welcome-screen">
-      <div className="hero-layout">
-        <div className="welcome-copy">
-          <div className="eyebrow"><span className="eyebrow-dot"/> HI, KGPian. I'M DUCK.</div>
-          <h1>Your campus,<br/><em>a little lighter.</em></h1>
-          <p>Big questions, small worries. I'll help you figure things out, one quack at a time.</p>
-          <div className="hero-stamp"><Sparkles size={15}/> Your tiny, mighty campus sidekick.</div>
-        </div>
-        <DuckyScene />
-      </div>
-      <div className="quick-starts">
-        <div className="quick-title"><span>WHERE TO?</span><span className="quick-title-line" /></div>
-        <div className="quick-grid">
-          <button type="button" className="quick-card" onClick={() => onPrompt('Find CH21207 Fluid Mechanics previous-year midsem papers')}>
-            <span className="quick-icon"><FileSearch2 size={19}/></span>
-            <span className="quick-copy"><strong>Find question papers</strong><small>Look up a PYQ</small></span>
-            <ArrowRight size={16}/>
-          </button>
-          <button type="button" className="quick-card" onClick={onLibrary}>
-            <span className="quick-icon"><BookOpen size={19}/></span>
-            <span className="quick-copy"><strong>Open my library</strong><small>Files & shared notes</small></span>
-            <ArrowRight size={16}/>
-          </button>
-          <button type="button" className="quick-card" onClick={onGmail}>
-            <span className="quick-icon"><Inbox size={19}/></span>
-            <span className="quick-copy"><strong>Connect my inbox</strong><small>Gmail integration</small></span>
-            <ArrowRight size={16}/>
-          </button>
-        </div>
-      </div>
-    </div>
+    <motion.div className="msg msg-ai thinking" role="status" aria-label="DucKGP is working on your message" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
+      <div className="msg-avatar"><Duck size={34} interactive={false} /></div>
+      <div className="msg-main"><div className="msg-bubble think-bubble"><span className="dots"><i /><i /><i /></span>
+        <span>Thinking · {s}s</span>{s >= 20 && <small>Still working — tool lookups can take a while.</small>}
+        <button type="button" className="link-btn" onClick={onStop}>Stop waiting</button></div></div>
+    </motion.div>
   );
 }
 
 export default function App() {
-  const { session } = useAuth();
-  const userId = session?.user.id;
-  const email = session?.user.email;
-  const [view, setView] = useState<View>('chat');
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedId, setSelectedId] = useState('');
-  const [historyLoading, setHistoryLoading] = useState(true);
-  const [historyError, setHistoryError] = useState('');
-  const [historyRetry, setHistoryRetry] = useState(0);
-  const [isSidebarOpen, setSidebarOpen] = useState(false);
-  const [isBusy, setIsBusy] = useState(false);
-  const [suggestedText, setSuggestedText] = useState('');
-  const [apiStatus, setApiStatus] = useState<ApiStatus>('checking');
-  const [profileName, setProfileName] = useState('');
-  const [signOutError, setSignOutError] = useState('');
-
-  const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const endRef = useRef<HTMLDivElement | null>(null);
-
-  const activeConversation = conversations.find((c) => c.id === selectedId) ?? conversations[0];
-  const activeId = activeConversation?.id;
-  const messages = activeConversation?.messages ?? [];
-
-  // Fetch the signed-in student's actual chat history; do not read global localStorage chats.
-  useEffect(() => {
-    if (!userId) return;
-    let cancelled = false;
-    setHistoryLoading(true);
-    setHistoryError('');
-    async function loadHistory() {
-      try {
-        const saved = await loadCloudConversations(userId!);
-        if (cancelled) return;
-        const next = saved.length ? saved : [createConversation()];
-        setConversations(next);
-        setSelectedId(next[0].id);
-      } catch (error) {
-        if (!cancelled) setHistoryError(error instanceof Error ? error.message : 'Could not load chat history.');
-      } finally {
-        if (!cancelled) setHistoryLoading(false);
-      }
-    }
-    void loadHistory();
-    return () => { cancelled = true; };
-  }, [userId, historyRetry]);
-
-  useEffect(() => {
-    if (!userId) return;
-    let cancelled = false;
-    async function loadName() {
-      const { data } = await supabase.from('profiles').select('full_name').eq('id', userId);
-      if (!cancelled && data?.[0]?.full_name) setProfileName(String(data[0].full_name));
-    }
-    void loadName();
-    return () => { cancelled = true; };
-  }, [userId]);
-
-  // Display a real backend status rather than a hardcoded 'live' label.
-  useEffect(() => {
-    let mounted = true;
-    async function check() {
-      try {
-        const result = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(5000) });
-        if (mounted) setApiStatus(result.ok ? 'online' : 'offline');
-      } catch {
-        if (mounted) setApiStatus('offline');
-      }
-    }
-    void check();
-    const timer = window.setInterval(() => { void check(); }, 45_000);
-    return () => { mounted = false; window.clearInterval(timer); };
-  }, []);
-
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }); }, [messages.length, isBusy, selectedId]);
-
-  const cancel = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setIsBusy(false);
-  }, []);
-
-  const newChat = useCallback(() => {
-    cancel();
-    setView('chat');
-    setSidebarOpen(false);
-    setSuggestedText('');
-    const empty = conversations.find((c) => c.messages.length === 0);
-    if (empty) setSelectedId(empty.id);
-    else {
-      const fresh = createConversation();
-      setConversations((previous) => [fresh, ...previous]);
-      setSelectedId(fresh.id);
-    }
-    window.setTimeout(() => composerRef.current?.focus(), 50);
-  }, [cancel, conversations]);
-
-  const selectChat = useCallback((id: string) => {
-    cancel();
-    setSelectedId(id);
-    setView('chat');
-    setSidebarOpen(false);
-  }, [cancel]);
-
-  const deleteChat = useCallback(async (id: string) => {
-    cancel();
-    try {
-      // Never delete a remote chat that hasn't been persisted.
-      const conversation = conversations.find((c) => c.id === id);
-      if (conversation?.messages.length) await deleteCloudConversation(id);
-      const remaining = conversations.filter((c) => c.id !== id);
-      const next = remaining.length ? remaining : [createConversation()];
-      setConversations(next);
-      if (selectedId === id || !next.some((c) => c.id === selectedId)) setSelectedId(next[0].id);
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Could not delete this chat.');
-    }
-  }, [cancel, conversations, selectedId]);
-
-  const send = useCallback(async (content: string) => {
-    if (historyLoading || isBusy || !content.trim() || !activeId) return;
-    const conversationId = activeId;
-    const controller = new AbortController();
-    abortRef.current = controller;
-    const outgoing: Message = { id: crypto.randomUUID(), role: 'user', content: content.trim(), createdAt: Date.now() };
-    const previousMessages = activeConversation?.messages ?? [];
-    setConversations((current) => current.map((chat) => chat.id === conversationId ? {
-      ...chat,
-      title: chat.messages.length === 0 ? conversationTitle(content) : chat.title,
-      messages: [...chat.messages, outgoing],
-      updatedAt: Date.now(),
-    } : chat));
-    setIsBusy(true);
-    setView('chat');
-    try {
-      const result = await sendChatMessage(outgoing.content, conversationId, previousMessages, controller.signal);
-      if (controller.signal.aborted) return;
-      const incoming: Message = {
-        id: crypto.randomUUID(), role: 'assistant', content: result.reply, createdAt: Date.now(),
-        toolsUsed: result.toolsUsed, sources: result.sources,
-      };
-      setConversations((current) => current.map((chat) => chat.id === conversationId
-        ? { ...chat, messages: [...chat.messages, incoming], updatedAt: Date.now() }
-        : chat));
-    } catch (error) {
-      if (controller.signal.aborted) return;
-      const detail = error instanceof Error ? error.message : 'Unexpected error';
-      const failed: Message = {
-        id: crypto.randomUUID(), role: 'assistant', createdAt: Date.now(), error: true,
-        content: `Something went wrong: **${detail}**\n\nPlease check your connection and try again.`,
-      };
-      setConversations((current) => current.map((chat) => chat.id === conversationId
-        ? { ...chat, messages: [...chat.messages, failed], updatedAt: Date.now() }
-        : chat));
-    } finally {
-      if (abortRef.current === controller) { abortRef.current = null; setIsBusy(false); }
-    }
-  }, [historyLoading, isBusy, activeId, activeConversation]);
-
-  useEffect(() => {
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        setView('chat');
-        composerRef.current?.focus();
-      }
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'o') {
-        event.preventDefault();
-        newChat();
-      }
-      if (event.key === 'Escape') setView('chat');
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [newChat]);
-
-  function show(viewName: View) { setView(viewName); setSidebarOpen(false); }
-  async function signOut() {
-    setSignOutError('');
-    const { error } = await supabase.auth.signOut({ scope: 'local' });
-    if (error) { setSignOutError(error.message); setView('account'); }
-  }
-
-  if (historyLoading) return <div className="app-loading"><DuckMark size={76} animated /><p>Unpacking your conversations...</p></div>;
-  if (historyError) return (
-    <div className="app-loading"><DuckMark size={76}/><p>{historyError}</p><button type="button" className="action-button" onClick={() => setHistoryRetry((n) => n + 1)}>Try again</button></div>
-  );
-
-  if (view === 'library') return <Library onBack={() => setView('chat')}/>;
-
-  return (
-    <div className="app-frame">
-      <Sidebar
-        conversations={conversations} selectedId={activeId ?? ''} open={isSidebarOpen}
-        onClose={() => setSidebarOpen(false)} onSelect={selectChat} onNew={newChat}
-        onChat={() => show('chat')} onDelete={(id) => { void deleteChat(id); }} onLibrary={() => show('library')}
-        onGmail={() => show('gmail')} onAccount={() => show('account')}
-        onSignOut={() => { void signOut(); }} email={email}
-      />
-      <main className="main-panel">
-        <div className="ambient ambient-one" aria-hidden="true"/>
-        <div className="ambient ambient-two" aria-hidden="true"/>
-        <header className="main-header">
-          <div className="header-left">
-            <MobileMenuButton onClick={() => setSidebarOpen(true)}/>
-            <span className="header-location"><span className="header-star">✳</span><span>MY DUCK SPACE</span><span className="slash">/</span><strong>{messages.length ? activeConversation?.title : 'Home'}</strong></span>
-          </div>
-          <div className="header-right">
-            <span className={`connection-badge is-${apiStatus}`} title={`FastAPI: ${apiStatus}`}>
-              {apiStatus === 'offline' ? <WifiOff size={13}/> : <Wifi size={13}/>}
-              <span>{apiStatus === 'online' ? 'All systems go' : apiStatus === 'checking' ? 'Connecting...' : 'Backend offline'}</span>
-            </span>
-            <button type="button" className="topbar-icon" title="Open library" aria-label="Open library" onClick={() => show('library')}><BookOpen size={18}/></button>
-            <button type="button" className="topbar-icon" title="Gmail connections" aria-label="Gmail connections" onClick={() => show('gmail')}><Inbox size={18}/></button>
-            <button type="button" className="topbar-avatar" title="My account" aria-label="My account" onClick={() => show('account')}><UserRound size={17}/></button>
-          </div>
-        </header>
-
-        <div className={`main-scroll ${messages.length ? 'is-chatting' : 'is-welcome'}`}>
-          {messages.length === 0 ? (
-            <Welcome onPrompt={(prompt) => { void send(prompt); }} onLibrary={() => show('library')} onGmail={() => show('gmail')}/>
-          ) : (
-            <div className="conversation-view">
-              <div className="conversation-top">
-                <span className="conversation-kicker">DUCK TALK / {activeId?.slice(0, 8).toUpperCase()}</span>
-                <div className="conversation-title-row"><h2>{activeConversation?.title}</h2></div>
-                <p>Thinking together, one message at a time.</p>
-              </div>
-              <div className="message-list">
-                {messages.map((message) => <ChatMessage key={message.id} message={message}/>)}
-                {isBusy && <LoadingMessage/>}
-              </div>
-              <div ref={endRef} className="end-marker"/>
-            </div>
-          )}
-        </div>
-        <Composer
-          onSend={(content) => { void send(content); }} onStop={cancel} busy={isBusy}
-          focusRef={composerRef} suggestedText={suggestedText}
-          onSuggestionApplied={() => setSuggestedText('')}
-        />
-      </main>
-
-      {(view === 'gmail' || view === 'account') && (
-        <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setView('chat'); }}>
-          <section className="modal-card" role="dialog" aria-modal="true" aria-label={view === 'gmail' ? 'Gmail connection' : 'My account'}>
-            <button type="button" className="modal-close" onClick={() => setView('chat')} aria-label="Close dialog"><X size={18}/></button>
-            <div className="modal-symbol">{view === 'gmail' ? <Inbox size={23}/> : <UserRound size={23}/>}</div>
-            {view === 'gmail' ? (
-              <>
-                <p className="modal-eyebrow">YOUR CONNECTIONS</p>
-                <h2>Gmail, meet DucKGP.</h2>
-                <p>Connect your inbox to let the assistant search and summarize your mail when you ask. You stay in control.</p>
-                <GmailConnect />
-              </>
-            ) : (
-              <>
-                <p className="modal-eyebrow">YOUR SPACE</p>
-                <h2>{profileName || 'My account'}</h2>
-                <p>{email || 'Signed in to DucKGP'}</p>
-                {signOutError && <p role="alert" className="auth-error">{signOutError}</p>}
-                <button type="button" className="action-button" onClick={() => { void signOut(); }}>Sign out <ArrowRight size={16}/></button>
-              </>
-            )}
-            <button type="button" className="modal-back" onClick={() => setView('chat')}><ArrowLeft size={15}/> Back to chat</button>
-          </section>
-        </div>
-      )}
-    </div>
-  );
+  return <IntegrationsProvider><Shell /></IntegrationsProvider>;
 }

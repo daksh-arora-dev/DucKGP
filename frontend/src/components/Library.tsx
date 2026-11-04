@@ -21,7 +21,7 @@ type Resource = StoredFile & {
 const MAX_BYTES = 20 * 1024 * 1024;
 const EXTENSIONS = ['pdf', 'doc', 'docx', 'pptx', 'xlsx', 'txt', 'png', 'jpg', 'jpeg'];
 
-export default function Library({ onBack }: { onBack: () => void }) {
+export default function Library() {
   const [tab, setTab] = useState<Tab>('personal');
   const [userId, setUserId] = useState('');
   const [documents, setDocuments] = useState<Document[]>([]);
@@ -167,49 +167,46 @@ export default function Library({ onBack }: { onBack: () => void }) {
     }
   }
 
+  const shared = tab === 'shared';
+  const rows = shared
+    ? resources.filter(item => `${item.title} ${item.author_name} ${item.course_code}`.toLowerCase().includes(search.toLowerCase()))
+    : documents;
   return (
-    <div className="library-page">
-      <div className="library-panel">
-        <button onClick={onBack}>← Back to DucKGP chat</button>
-        <h1>DucKGP Library</h1>
-        <div className="library-tabs">
-          <button onClick={() => { setTab('personal'); setFile(null); }} disabled={busy}>My documents</button>
-          <button onClick={() => { setTab('shared'); setFile(null); }} disabled={busy}>Shared resources</button>
+    <div className="view-page">
+      <div className="view-inner">
+        <header className="view-head"><h1>Library</h1><p className="muted">{shared ? 'Approved resources are visible to signed-in students.' : 'Only you can see these documents.'}</p></header>
+        <div className="segmented" role="tablist" aria-label="Library sections">
+          <button type="button" role="tab" aria-selected={!shared} className={!shared ? 'active' : ''} disabled={busy} onClick={() => { setTab('personal'); setFile(null); }}><span className="seg-label">My documents</span></button>
+          <button type="button" role="tab" aria-selected={shared} className={shared ? 'active' : ''} disabled={busy} onClick={() => { setTab('shared'); setFile(null); }}><span className="seg-label">Shared resources</span></button>
         </div>
-        <p>{tab === 'personal' ? 'Only you can see these documents.' : 'Approved resources are visible to signed-in students.'}</p>
-
-        <form className="library-form" onSubmit={upload}>
-          <input key={tab} type="file" required
-            accept=".pdf,.doc,.docx,.pptx,.xlsx,.txt,.png,.jpg,.jpeg"
-            onChange={event => setFile(event.target.files?.[0] ?? null)} />
-          {tab === 'shared' && <>
+        <form className="lib-form" onSubmit={upload}>
+          <input key={tab} type="file" required accept=".pdf,.doc,.docx,.pptx,.xlsx,.txt,.png,.jpg,.jpeg" onChange={event => setFile(event.target.files?.[0] ?? null)} />
+          {shared && <>
             <input placeholder="Resource title" value={title} onChange={event => setTitle(event.target.value)} required />
             <input placeholder="Author name" value={author} onChange={event => setAuthor(event.target.value)} required />
             <input placeholder="Course code (e.g. CH21207)" value={course} onChange={event => setCourse(event.target.value)} />
-            <textarea placeholder="Description (optional)" value={description}
-              onChange={event => setDescription(event.target.value)} />
+            <textarea placeholder="Description (optional)" value={description} onChange={event => setDescription(event.target.value)} />
           </>}
-          <button type="submit" disabled={busy || !userId}>{busy ? 'Working...' : 'Upload file'}</button>
+          <button type="submit" className="btn primary" disabled={busy || !userId}>{busy ? 'Working…' : 'Upload file'}</button>
         </form>
-        {error && <p className="auth-error">{error}</p>}
-        {notice && <p className="auth-message">{notice}</p>}
-
-        <h2>{tab === 'personal' ? 'My files' : 'Available resources'}</h2>
-        {tab === 'shared' && <input className="library-search" placeholder="Search by title, author, course" value={search} onChange={e => setSearch(e.target.value)} />}
-        {tab === 'personal'
-          ? documents.map(item => <div className="library-item" key={item.id}>
-              <span>{item.filename}</span>
-              <button onClick={() => void download('personal-documents', item)}>Download</button>
-              <button disabled={busy} onClick={() => void remove('personal-documents', 'documents', item)}>Delete</button>
-            </div>)
-          : resources.filter(item => `${item.title} ${item.author_name} ${item.course_code}`.toLowerCase().includes(search.toLowerCase())).map(item => <div className="library-item" key={item.id}>
-              <span><strong>{item.title}</strong> — {item.author_name} · {item.course_code || 'General'}
-                {item.uploader_id === userId && ` · ${item.status}`}
-                {item.description && <small> — {item.description}</small>}</span>
-              <button onClick={() => void download('shared-resources', item)}>Download</button>
-              {item.uploader_id === userId &&
-                <button disabled={busy} onClick={() => void remove('shared-resources', 'resources', item)}>Delete</button>}
-            </div>)}
+        {error && <p className="error-text" role="alert">{error}</p>}
+        {notice && <p className="ok-text" role="status">{notice}</p>}
+        <h3 className="group-title">{shared ? 'Available resources' : 'My files'}</h3>
+        {shared && <input className="lib-search" placeholder="Search by title, author, course" aria-label="Search resources" value={search} onChange={e => setSearch(e.target.value)} />}
+        {rows.length === 0 && <p className="muted">{shared ? 'No resources match.' : 'No documents yet.'}</p>}
+        <ul className="lib-list">
+          {shared
+            ? (rows as Resource[]).map(item => <li key={item.id}>
+                <span><strong>{item.title}</strong> — {item.author_name} · {item.course_code || 'General'}{item.uploader_id === userId && ` · ${item.status}`}{item.description && <small> — {item.description}</small>}</span>
+                <button type="button" className="btn ghost" onClick={() => void download('shared-resources', item)}>Download</button>
+                {item.uploader_id === userId && <button type="button" className="btn ghost danger-text" disabled={busy} onClick={() => void remove('shared-resources', 'resources', item)}>Delete</button>}
+              </li>)
+            : (rows as Document[]).map(item => <li key={item.id}>
+                <span>{item.filename}</span>
+                <button type="button" className="btn ghost" onClick={() => void download('personal-documents', item)}>Download</button>
+                <button type="button" className="btn ghost danger-text" disabled={busy} onClick={() => void remove('personal-documents', 'documents', item)}>Delete</button>
+              </li>)}
+        </ul>
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
+import Duck from '../components/Duck';
 
 export default function Login() {
 
@@ -74,7 +75,8 @@ export default function Login() {
 
       <div className="auth-card">
 
-        <h1>DucKGP 🦆</h1>
+        <Duck size={84} />
+        <h1>DucKGP</h1>
 
         <p>Your IIT Kharagpur AI Assistant</p>
 

@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
+import Duck from '../components/Duck';
 
 interface ProfileSetupProps {
   userId: string;
@@ -73,7 +74,8 @@ export default function ProfileSetup({
     <div className="auth-page">
       <div className="auth-card profile-card">
 
-        <h1>DucKGP 🦆</h1>
+        <Duck size={84} />
+        <h1>DucKGP</h1>
         <h2>Complete Your Profile</h2>
 
         <p>
